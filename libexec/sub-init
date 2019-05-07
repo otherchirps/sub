@@ -33,12 +33,21 @@ abs_dirname() {
 root="$(abs_dirname "$0")/.."
 
 if [ -z "$print" ]; then
+  cmd_string="eval \"\$(${_SUB_ROOT}/bin/sub init -)\""
+
   case "$shell" in
   bash )
     profile='~/.bash_profile'
     ;;
   zsh )
     profile='~/.zshenv'
+    ;;
+  fish )
+    profile="~/.config/config.fish"
+    # Slightly different message for fish.
+    # eval in fish won't cope with the multiline output of this script.
+    # But it's source command will eat it all properly.
+    cmd_string="${_SUB_ROOT}/bin/sub init - | source"
     ;;
   * )
     profile='your profile'
@@ -48,23 +57,32 @@ if [ -z "$print" ]; then
   { echo "# Load sub automatically by adding"
     echo "# the following to ${profile}:"
     echo
-    echo "eval \"\$(${_SUB_ROOT}/bin/sub init -)\""
+    echo $cmd_string
     echo
   } >&2
 
   exit 1
 fi
 
-echo "export PATH=\"\${PATH}:${_SUB_ROOT}/bin\""
+case "$shell" in 
+bash | zsh )
+  echo "export PATH=\"\${PATH}:${_SUB_ROOT}/bin\""
+  ;;
+fish )
+  echo "set -x PATH \"\$PATH:${_SUB_ROOT}/bin\""
+  ;;
+esac
 
 case "$shell" in
-bash | zsh )
+bash | zsh | fish )
   echo "source \"$root/completions/sub.${shell}\""
   ;;
 esac
 
 commands=(`sub commands --sh`)
 IFS="|"
+case "$shell" in 
+bash | zsh )
 cat <<EOS
 _sub_wrapper() {
   local command="\$1"
@@ -80,6 +98,26 @@ _sub_wrapper() {
   esac
 }
 EOS
+;;
+fish )
+cat <<EOFS
+function sub 
+  set -l command "\$argv[1]"
+  if [ (count \$argv) -gt 0 ]
+    set -e argv[1]
+  end
+
+  switch \$command
+    case \$commands
+      eval (sub "sh-\$command" "\$argv")
+      
+    case '*'
+      command sub "\$command" "\$argv"
+  end
+end
+EOFS
+;;
+esac
 
 # zsh can't pass argument with aliases, but bash can.
 # zsh can have functions with the name being only numbers, but bash can't.
